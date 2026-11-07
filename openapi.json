@@ -1,0 +1,1301 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Primat API",
+    "version": "3.0",
+    "description": "Daily per-store Swedish grocery prices: ICA, Coop, Willys, Hemköp, Lidl, City Gross. v3 is the agent-first surface: v2's price-fact semantics (regular, member, per-unit multibuy, campaign; changed_at/confirmed_at change-log semantics; gtin) plus a place->store resolver, keyset cursor pages over full store catalogs, bounded batch lookup, generation-pinned deep price history, an instant no-email signup and browser-safe publishable keys.\n\nChange-log semantics: changed_at is when a price last CHANGED; confirmed_at is when the store was last checked. No change since changed_at means CONFIRMED UNCHANGED, not unmeasured.\n\nSignup: POST /api/v3/signup returns a tryout key instantly: one hour, 60 req/min, 2,000 rows/day plus a shared pool for all tryout keys. Ongoing access starts with a 30-day free App trial (card required; 249 SEK/month ex VAT after the trial, cancel anytime) at https://primat.nu/data; the tryout key keeps working once the trial starts.\n\nAttribution (gratisnivån): visa ”Prisdata från primat.nu” med länk till https://primat.nu där datat visas. Every data response carries the credit in its `attribution` field. Redistribution of the data as a dataset (mirrors, dumps, price-data APIs) is not permitted on any plan — build products, don't resell the data. A Synk database is for your own use, and yours to keep if you cancel. Full villkor: https://primat.nu/villkor.\n\nPrimat är under utveckling. Strukturen, datat och prismodellen kan komma att ändras. Om ändringar sker så ser vi till att meddela användare via epost.",
+    "contact": {
+      "email": "kontakt@primat.nu"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://primat.nu"
+    }
+  ],
+  "tags": [
+    {
+      "name": "discover",
+      "description": "No key needed"
+    },
+    {
+      "name": "stores"
+    },
+    {
+      "name": "products"
+    },
+    {
+      "name": "history",
+      "description": "Paid tiers"
+    },
+    {
+      "name": "account"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "apiKey": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "API key as bearer token (or X-API-Key header). Secret keys (primat_live_) are server-side; publishable keys (primat_pk_) are browser-safe, origin-locked and read-only. Keys: https://primat.nu/data or POST /api/v3/signup."
+      }
+    },
+    "parameters": {
+      "stores": {
+        "name": "stores",
+        "in": "query",
+        "description": "Store scope: comma-separated chain:store_id pairs, e.g. stores=willys:2103,citygross:3204 (max 15). Find ids via /api/v3/stores/resolve.",
+        "schema": {
+          "type": "string"
+        }
+      },
+      "limit": {
+        "name": "limit",
+        "in": "query",
+        "schema": {
+          "type": "integer",
+          "default": 100
+        },
+        "description": "Row cap per call; also capped by your plan's max_rows_per_call."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "description": "Uniform error model: every non-2xx answer carries this shape.",
+        "properties": {
+          "error": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "description": "Machine code, e.g. invalid_api_key, rate_limited, daily_row_budget_exceeded, query_required, bad_request, not_found, product_not_found, place_not_found, upgrade_required, trial_required, tryout_expired, tryout_used, origin_not_allowed, read_only_key, email_in_use, invalid_email, signup_limit_reached, history_timeout, service_unavailable, secret_key_required, feed_not_ready, snapshot_gone, delta_gone."
+              },
+              "message": {
+                "type": "string",
+                "description": "Human/agent-readable English text, including the way forward (signup path on quota errors)."
+              }
+            },
+            "required": [
+              "code",
+              "message"
+            ]
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "Prices": {
+        "type": "object",
+        "description": "Price FACTS. regular: what everyone pays (public campaigns included). member: only set while a member price runs. multiprice/member_multiprice: PER-UNIT price when buying `quantity` (7 with quantity 5 = '5 for 35 kr'). comparison: unit price per kg/l/st computed on the REGULAR price. offer: the active campaign behind the current pricing, null when none. effective: least price a card-carrying shopper pays right now (a convenience fold; combine the facts yourself for anything serious). previous: on /deals results.",
+        "properties": {
+          "regular": {
+            "type": "number",
+            "nullable": true
+          },
+          "member": {
+            "type": "number",
+            "nullable": true
+          },
+          "multiprice": {
+            "type": "object",
+            "properties": {
+              "price": {
+                "type": "number",
+                "nullable": true
+              },
+              "quantity": {
+                "type": "integer",
+                "nullable": true
+              }
+            }
+          },
+          "member_multiprice": {
+            "type": "object",
+            "properties": {
+              "price": {
+                "type": "number",
+                "nullable": true
+              },
+              "quantity": {
+                "type": "integer",
+                "nullable": true
+              }
+            }
+          },
+          "comparison": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "price": {
+                "type": "number"
+              },
+              "unit": {
+                "type": "string",
+                "enum": [
+                  "kg",
+                  "l",
+                  "st",
+                  "m"
+                ]
+              }
+            }
+          },
+          "offer": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "price": {
+                "type": "number",
+                "nullable": true
+              },
+              "label": {
+                "type": "string",
+                "nullable": true
+              },
+              "valid_from": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              },
+              "valid_until": {
+                "type": "string",
+                "format": "date-time",
+                "nullable": true
+              }
+            }
+          },
+          "effective": {
+            "type": "number",
+            "nullable": true
+          },
+          "previous": {
+            "type": "number",
+            "nullable": true
+          }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string",
+            "enum": [
+              "ica",
+              "coop",
+              "willys",
+              "hemkop",
+              "lidl",
+              "citygross"
+            ]
+          },
+          "store_id": {
+            "type": "string"
+          },
+          "product_id": {
+            "type": "string",
+            "description": "Chain-native id; only unique per chain."
+          },
+          "name": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true,
+            "description": "The chain's own category path, ' > '-separated."
+          },
+          "amount": {
+            "type": "number",
+            "nullable": true
+          },
+          "unit": {
+            "type": "string",
+            "nullable": true
+          },
+          "package": {
+            "type": "string",
+            "nullable": true
+          },
+          "sold_by_weight": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "True for an item the chain sells by weight: its prices are for the approximate weight in amount/unit."
+          },
+          "available": {
+            "type": "boolean"
+          },
+          "gtin": {
+            "type": "string",
+            "nullable": true,
+            "description": "GTIN/EAN barcode — the cross-store product key. Null where the chain publishes none."
+          },
+          "prices": {
+            "$ref": "#/components/schemas/Prices"
+          },
+          "changed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "urls": {
+            "type": "object",
+            "properties": {
+              "primat": {
+                "type": "string"
+              },
+              "source": {
+                "type": "string",
+                "nullable": true
+              },
+              "image": {
+                "type": "string",
+                "nullable": true,
+                "description": "The chain's ORIGINAL product-image URL, on the chain's own image server. App tier and up; the key is absent on free-class keys. Best effort: the URL is a pointer to the source, so format, size and availability are the chain's, and it may change or stop serving without notice. No image rights are conveyed — Primat licenses its price and product data, not the chains' photos. For licensed, stable product images pair gtin with an image source of your own (e.g. GS1 Validoo)."
+              }
+            }
+          },
+          "discount_ratio": {
+            "type": "number",
+            "description": "On /deals results: (previous - current) / previous."
+          }
+        }
+      },
+      "PriceRow": {
+        "type": "object",
+        "description": "The flat catalog-page row (/api/v3/prices): one product at one store, price facts inline.",
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "store_id": {
+            "type": "string"
+          },
+          "product_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "brand": {
+            "type": "string",
+            "nullable": true
+          },
+          "gtin": {
+            "type": "string",
+            "nullable": true
+          },
+          "changed_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "price": {
+            "type": "number",
+            "nullable": true
+          },
+          "member_price": {
+            "type": "number",
+            "nullable": true
+          },
+          "multi_price": {
+            "type": "number",
+            "nullable": true
+          },
+          "multi_count": {
+            "type": "integer",
+            "nullable": true
+          },
+          "member_multi_price": {
+            "type": "number",
+            "nullable": true
+          },
+          "member_multi_count": {
+            "type": "integer",
+            "nullable": true
+          },
+          "effective_price": {
+            "type": "number",
+            "nullable": true
+          },
+          "offer_price": {
+            "type": "number",
+            "nullable": true
+          },
+          "offer_label": {
+            "type": "string",
+            "nullable": true
+          },
+          "offer_valid_until": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "image_url": {
+            "type": "string",
+            "nullable": true,
+            "description": "The chain's original product-image URL (App tier and up; key absent on free-class keys). Same semantics as Product urls.image: a best-effort pointer to the chain's own image server, no image rights conveyed."
+          }
+        }
+      },
+      "Store": {
+        "type": "object",
+        "properties": {
+          "chain": {
+            "type": "string"
+          },
+          "store_id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "address": {
+            "type": "string",
+            "nullable": true
+          },
+          "postcode": {
+            "type": "string",
+            "nullable": true
+          },
+          "city": {
+            "type": "string",
+            "nullable": true
+          },
+          "coordinates": {
+            "type": "object",
+            "properties": {
+              "latitude": {
+                "type": "number",
+                "nullable": true
+              },
+              "longitude": {
+                "type": "number",
+                "nullable": true
+              }
+            }
+          },
+          "available": {
+            "type": "boolean",
+            "description": "The pipeline has price data for this store."
+          },
+          "tier": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "full",
+              "offers_only",
+              null
+            ],
+            "description": "full = complete assortment with prices; offers_only = campaign prices only (no assortment feed exists)."
+          },
+          "confirmed_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "ResolveResult": {
+        "type": "object",
+        "description": "The site's own place -> store-set model: ranked nearby stores plus the default selection the consumer site would pick (nearest full-catalog door of each chain first, max 2/chain, 10 total, offers_only doors last).",
+        "properties": {
+          "query": {
+            "type": "object"
+          },
+          "place": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "locality": {
+                "type": "string",
+                "nullable": true
+              },
+              "postal_code": {
+                "type": "string",
+                "nullable": true
+              },
+              "latitude": {
+                "type": "number"
+              },
+              "longitude": {
+                "type": "number"
+              }
+            }
+          },
+          "default_selection": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "chain:store_id keys, ready for the stores= parameter."
+          },
+          "stores": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "chain": {
+                  "type": "string"
+                },
+                "store_id": {
+                  "type": "string"
+                },
+                "key": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "city": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "km": {
+                  "type": "number"
+                },
+                "tier": {
+                  "type": "string",
+                  "nullable": true
+                },
+                "selected": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      },
+      "HistoryPoint": {
+        "type": "object",
+        "description": "One price CHANGE day. Absence of a date means confirmed unchanged; price null means delisted from the store.",
+        "properties": {
+          "date": {
+            "type": "string",
+            "format": "date"
+          },
+          "price": {
+            "type": "number",
+            "nullable": true
+          },
+          "member_price": {
+            "type": "number",
+            "nullable": true
+          },
+          "effective": {
+            "type": "number",
+            "nullable": true
+          }
+        }
+      },
+      "HistoryResult": {
+        "type": "object",
+        "properties": {
+          "series": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "chain": {
+                  "type": "string"
+                },
+                "store_id": {
+                  "type": "string"
+                },
+                "product_id": {
+                  "type": "string"
+                },
+                "points": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryPoint"
+                  }
+                }
+              }
+            }
+          },
+          "count": {
+            "type": "integer"
+          },
+          "depth": {
+            "type": "string",
+            "enum": [
+              "window",
+              "12mo",
+              "full"
+            ],
+            "description": "What your plan unlocked: window = the serving bundle's chart window; 12mo/full = committed history generations."
+          },
+          "history_generation": {
+            "type": "integer",
+            "nullable": true
+          },
+          "gtin": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "apiKey": []
+    }
+  ],
+  "paths": {
+    "/api/v3": {
+      "get": {
+        "tags": [
+          "discover"
+        ],
+        "summary": "Self-describing API directory.",
+        "security": []
+      }
+    },
+    "/api/v3/openapi.json": {
+      "get": {
+        "tags": [
+          "discover"
+        ],
+        "summary": "This document.",
+        "security": []
+      }
+    },
+    "/api/v3/signup": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Instant tryout key, no email round-trip: valid one hour; ongoing access starts with a 30-day App trial.",
+        "description": "Body: {\"email\": \"you@example.com\"}. Returns 201 with the key (shown once). The key is a one-hour tryout: 60 req/min, 2,000 rows/day plus a shared global pool. Ongoing access: the account owner logs in at https://primat.nu/data with this address and starts the 30-day free App trial (card required; 249 SEK/month ex VAT after the trial, cancel anytime); the key then runs on App quotas (250 req/min, 100,000 rows/day). One tryout per address: a repeat signup answers 402 tryout_used. 409 if the address already has an established account.",
+        "security": [],
+        "responses": {
+          "201": {
+            "description": "api_key, key{}, quota{}, confirm{}"
+          },
+          "409": {
+            "description": "email_in_use",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "tryout_used",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/confirm/request": {
+      "post": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Email the account owner the link to start the 30-day App trial.",
+        "description": "Authenticate with the tryout key while it is valid. Rate-limited (3/day per key). The mail links https://primat.nu/data, where the owner logs in with the signup address and starts the trial; the key then runs on App quotas."
+      }
+    },
+    "/api/v3/me": {
+      "get": {
+        "tags": [
+          "account"
+        ],
+        "summary": "Account, plan limits (from the entitlement matrix) and usage today for the presented key."
+      }
+    },
+    "/api/v3/stores": {
+      "get": {
+        "tags": [
+          "stores"
+        ],
+        "summary": "Store register with coverage tier and confirmed_at.",
+        "description": "Free on every plan: store lookups don't count toward rows/day.",
+        "parameters": [
+          {
+            "name": "all",
+            "in": "query",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            },
+            "description": "Default: only stores with price data. all=1 adds register-only stores."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data[Store], count",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Store"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/stores/resolve": {
+      "get": {
+        "tags": [
+          "stores"
+        ],
+        "summary": "Place -> ranked nearby stores + the site's own default store selection.",
+        "description": "Give ONE of: place= (locality name or 5-digit postcode), postcode=, or lat=&lon=. The default_selection is exactly what the consumer site would pick for that visitor — use it directly as the stores= parameter. Free on every plan: store lookups don't count toward rows/day.",
+        "parameters": [
+          {
+            "name": "place",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "postcode",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "lat",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "lon",
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "ResolveResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResolveResult"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "place_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/products": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Ranked product search.",
+        "description": "With stores=: every carrying (store, product) row in your stores. Without: one row per product at its cheapest carrying store nationally. For FULL store catalogs use /api/v3/prices (keyset pages) — search is ranked and bounded, it does not paginate.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/stores"
+          },
+          {
+            "$ref": "#/components/parameters/limit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data[Product], count, query",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Product"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "query": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/products/{chain}/{store_id}/{product_id}": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "One product at one store.",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "store_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data: Product (+store_name)"
+          },
+          "404": {
+            "description": "product_not_found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/prices": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Full store catalogs as keyset cursor pages.",
+        "description": "The bulk surface: every current price row for up to 15 stores, paged with an opaque keyset cursor over (product_id, chain, store_id) — pages are stable, never skip or duplicate a row, and interleave the same product across your stores for easy comparison. Follow next_cursor until null.",
+        "parameters": [
+          {
+            "name": "stores",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "description": "Opaque; from the previous page's next_cursor."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 500,
+              "maximum": 1000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data[PriceRow], count, next_cursor, bundle_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/PriceRow"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    },
+                    "next_cursor": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "bundle_id": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/deals": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Current price drops with prices.previous and discount_ratio.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/stores"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 500
+            }
+          },
+          {
+            "name": "lookback_days",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 14
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data[Product], count"
+          }
+        }
+      }
+    },
+    "/api/v3/cheap": {
+      "get": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Cheapest products by comparison (unit) price.",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/stores"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "default": 50,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "data[Product], count"
+          }
+        }
+      }
+    },
+    "/api/v3/batch": {
+      "post": {
+        "tags": [
+          "products"
+        ],
+        "summary": "Up to 100 product lookups in one call (every plan; response bounded by your plan's per-call row cap).",
+        "description": "Body: {\"lookups\": [{\"gtin\": \"7310865093530\"} | {\"chain\": \"willys\", \"store_id\": \"2103\", \"product_id\": \"100302995_ST\"} | {\"chain\": \"willys\", \"product_id\": \"100302995_ST\"}], \"stores\": \"willys:2103,...\" (optional scope)}. GTIN lookups return every matching chain; without a store scope each chain answers with its cheapest carrying store.",
+        "responses": {
+          "200": {
+            "description": "data[{lookup, count, results[Product]}], count"
+          },
+          "403": {
+            "description": "upgrade_required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/history/{chain}/{store_id}/{product_id}": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "Daily price-change history for one product at one store.",
+        "description": "Paid tiers — Pro: generation-pinned 12 months. Byrå: full history (since Dec 2025). Deep reads are pinned to a committed history generation and time-budgeted (504 history_timeout on overruns).",
+        "parameters": [
+          {
+            "name": "chain",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "store_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HistoryResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResult"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "upgrade_required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/history/{gtin}": {
+      "get": {
+        "tags": [
+          "history"
+        ],
+        "summary": "History across carrying stores by GTIN/EAN (up to 6 series).",
+        "description": "Default: each chain's cheapest carrying store. Scope explicitly with stores= (max 6).",
+        "parameters": [
+          {
+            "name": "gtin",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/stores"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "HistoryResult",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HistoryResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v3/sync": {
+      "get": {
+        "tags": [
+          "synk"
+        ],
+        "summary": "Synk manifest: the deltas a client at ?since=SEQ applies next.",
+        "description": "Synk, Pro and Byrå; secret keys; counts no rows/day. since=SEQ lists the deltas after SEQ (snapshot_required when SEQ is older than the 7-day retention); wait=S long-polls up to 60 s for a new sequence number. Carries the table schema and keys.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "The seq your database is at."
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60
+            },
+            "description": "Seconds to wait for a seq after since."
+          }
+        ]
+      }
+    },
+    "/api/v3/sync/snapshot": {
+      "get": {
+        "tags": [
+          "synk"
+        ],
+        "summary": "Your snapshot: three Parquet files (stores, products, prices).",
+        "description": "202 with Retry-After while it is being prepared (a few minutes, first time), then 200 with the file paths and the seq to sync from.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/api/v3/sync/snapshot/{seq}/{table}.parquet": {
+      "get": {
+        "tags": [
+          "synk"
+        ],
+        "summary": "One table of your snapshot as Parquet.",
+        "description": "The paths the snapshot response names.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Sequence number."
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "stores",
+                "products",
+                "prices"
+              ]
+            },
+            "description": "stores, products or prices."
+          }
+        ]
+      }
+    },
+    "/api/v3/sync/deltas/{seq}/{table}.parquet": {
+      "get": {
+        "tags": [
+          "synk"
+        ],
+        "summary": "One delta of one table as Parquet.",
+        "description": "Rows with op = upsert (the whole new row) or delete (the key). Apply deltas in order: delete every key in the file, insert the upserts.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Sequence number."
+          },
+          {
+            "name": "table",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "stores",
+                "products",
+                "prices"
+              ]
+            },
+            "description": "stores, products or prices."
+          }
+        ]
+      }
+    },
+    "/api/v3/sync/deltas/{seq}.sql": {
+      "get": {
+        "tags": [
+          "synk"
+        ],
+        "summary": "One delta as a SQL patch (gzip).",
+        "description": "Every statement checks that primat_sync.seq is the delta's from_seq, and the last moves it on: applied out of order or twice, a patch changes nothing. Rows change by delete and insert, so the tables need no key constraint.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Sequence number."
+          },
+          {
+            "name": "dialect",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "postgres",
+                "sqlite",
+                "duckdb"
+              ],
+              "default": "postgres"
+            },
+            "description": "The SQL dialect."
+          }
+        ]
+      }
+    },
+    "/api/v3/sync/deltas/{seq}.json": {
+      "get": {
+        "tags": [
+          "synk"
+        ],
+        "summary": "One delta as JSON pages.",
+        "description": "Rows ordered by key, next_cursor until the last page.",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        },
+        "parameters": [
+          {
+            "name": "seq",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            },
+            "description": "Sequence number."
+          },
+          {
+            "name": "table",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "stores",
+                "products",
+                "prices"
+              ]
+            },
+            "description": "stores, products or prices."
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "next_cursor from the page before."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 5000
+            },
+            "description": "Rows per page."
+          }
+        ]
+      }
+    }
+  }
+}
