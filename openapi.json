@@ -3,7 +3,7 @@
   "info": {
     "title": "Primat API",
     "version": "3.0",
-    "description": "Daily per-store Swedish grocery prices: ICA, Coop, Willys, Hemköp, Lidl, City Gross. v3 is the agent-first surface: v2's price-fact semantics (regular, member, per-unit multibuy, campaign; changed_at/confirmed_at change-log semantics; gtin) plus a place->store resolver, keyset cursor pages over full store catalogs, bounded batch lookup, generation-pinned deep price history, an instant no-email signup and browser-safe publishable keys.\n\nChange-log semantics: changed_at is when a price last CHANGED; confirmed_at is when the store was last checked. No change since changed_at means CONFIRMED UNCHANGED, not unmeasured.\n\nSignup: POST /api/v3/signup returns a tryout key instantly: one hour, 60 req/min, 2,000 rows/day plus a shared pool for all tryout keys. Ongoing access starts with a 30-day free App trial (card required; 249 SEK/month ex VAT after the trial, cancel anytime) at https://primat.nu/data; the tryout key keeps working once the trial starts.\n\nAttribution (gratisnivån): visa ”Prisdata från primat.nu” med länk till https://primat.nu där datat visas. Every data response carries the credit in its `attribution` field. Redistribution of the data as a dataset (mirrors, dumps, price-data APIs) is not permitted on any plan — build products, don't resell the data. A Synk database is for your own use, and yours to keep if you cancel. Full villkor: https://primat.nu/villkor.\n\nPrimat är under utveckling. Strukturen, datat och prismodellen kan komma att ändras. Om ändringar sker så ser vi till att meddela användare via epost.",
+    "description": "Daily per-store Swedish grocery prices: ICA, Coop, Willys, Hemköp, Lidl, City Gross. v3 is the agent-first surface: v2's price-fact semantics (regular, member, per-unit multibuy, campaign; changed_at/confirmed_at change-log semantics; gtin) plus a place->store resolver, keyset cursor pages over full store catalogs, bounded batch lookup, generation-pinned deep price history, an instant no-email signup and browser-safe publishable keys.\n\nChange-log semantics: changed_at is when a price last CHANGED; confirmed_at is when the store was last checked. No change since changed_at means CONFIRMED UNCHANGED, not unmeasured.\n\nSignup: POST /api/v3/signup returns a tryout key instantly: one hour, 60 req/min, 2,000 rows/day plus a shared pool for all tryout keys. Ongoing access starts with a 30-day free App trial (card required; 249 SEK/month ex VAT after the trial, cancel anytime) at https://primat.nu/data; the tryout key keeps working once the trial starts.\n\nCredit: every data response carries it in its `attribution` field (”Prisdata från primat.nu”, https://primat.nu). Redistribution of the data as a dataset (mirrors, dumps, price-data APIs) is not permitted on any plan — build products, don't resell the data. A Synk database is for your own use, and yours to keep if you cancel. Full villkor: https://primat.nu/villkor.\n\nPrimat är under utveckling. Strukturen, datat och prismodellen kan komma att ändras. Om ändringar sker så ser vi till att meddela användare via epost.",
     "contact": {
       "email": "kontakt@primat.nu"
     }
@@ -328,16 +328,19 @@
           },
           "offer_price": {
             "type": "number",
-            "nullable": true
+            "nullable": true,
+            "description": "The current campaign price, member campaigns included; null when no campaign is live at this store. offers=1 returns exactly the rows where it is set."
           },
           "offer_label": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The campaign's own text, e.g. \"2 för 30\"."
           },
           "offer_valid_until": {
             "type": "string",
             "format": "date-time",
-            "nullable": true
+            "nullable": true,
+            "description": "When the campaign ends, where known."
           },
           "image_url": {
             "type": "string",
@@ -833,7 +836,7 @@
           "products"
         ],
         "summary": "Full store catalogs as keyset cursor pages.",
-        "description": "The bulk surface: every current price row for up to 15 stores, paged with an opaque keyset cursor over (product_id, chain, store_id) — pages are stable, never skip or duplicate a row, and interleave the same product across your stores for easy comparison. Follow next_cursor until null.",
+        "description": "The bulk surface: every current price row for up to 15 stores, paged with an opaque keyset cursor over (product_id, chain, store_id) — pages are stable, never skip or duplicate a row, and interleave the same product across your stores for easy comparison. Follow next_cursor until null. With offers=1 the pages hold only the rows with a current campaign price: a store's campaigns without the rest of its catalog.",
         "parameters": [
           {
             "name": "stores",
@@ -859,6 +862,19 @@
               "default": 500,
               "maximum": 1000
             }
+          },
+          {
+            "name": "offers",
+            "in": "query",
+            "schema": {
+              "type": "integer",
+              "enum": [
+                0,
+                1
+              ],
+              "default": 0
+            },
+            "description": "1 = only the rows whose offer_price is set: the stores' current campaigns, member campaigns included. Same row shape, order and cursor as without it; only the rows returned count against rows/day."
           }
         ],
         "responses": {
@@ -899,6 +915,7 @@
           "products"
         ],
         "summary": "Current price drops with prices.previous and discount_ratio.",
+        "description": "Drops of the ordinary price on products without a current campaign; a drop that comes with a campaign belongs to that campaign. For a store's campaigns use /api/v3/prices?stores=…&offers=1.",
         "parameters": [
           {
             "$ref": "#/components/parameters/stores"

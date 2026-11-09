@@ -83,9 +83,18 @@ curl -H "Authorization: Bearer $PRIMAT_API_KEY" \
 
 `default_selection` i svaret från `stores/resolve` är en lista med
 `chain:store_id`, klar att använda som `stores=`. Hela sortiment hämtas från
-`/api/v3/prices`, i sidor som följs med `next_cursor` tills den är null.
-`/api/v3/deals` ger aktuella prissänkningar med tidigare pris, och
-`/api/v3/cheap` varorna med lägst jämförpris. Alla anrop:
+`/api/v3/prices`, i sidor som följs med `next_cursor` tills den är null. Med
+`offers=1` ger samma anrop bara raderna där `offer_price` är satt: butikernas
+aktuella kampanjer, medlemskampanjerna inräknade, utan resten av sortimentet.
+
+```sh
+# Bara kampanjerna i en butik:
+curl -H "Authorization: Bearer $PRIMAT_API_KEY" \
+  'https://primat.nu/api/v3/prices?stores=willys:2193&offers=1'
+```
+
+`/api/v3/deals` ger sänkta ordinarie priser med tidigare pris, på varor utan
+kampanj, och `/api/v3/cheap` varorna med lägst jämförpris. Alla anrop:
 [primat.nu/api](https://primat.nu/api).
 
 Ett svar som inte är 2xx har formen `{"error": {"code", "message"}}`, med
@@ -113,6 +122,11 @@ for row in api.products("mellanmjölk", stores=stores, limit=20)["data"]:
 # Hela sortimentet i en butik, sida för sida:
 for row in api.iter_prices("willys:2193", limit=500):
     print(row["product_id"], row["name"], row["price"])
+
+# Bara butikens aktuella kampanjer:
+for row in api.iter_prices("willys:2193", offers=True):
+    print(row["name"], row["offer_price"], row["offer_label"],
+          row["offer_valid_until"])
 ```
 
 | Metod | Anrop |
@@ -122,7 +136,7 @@ for row in api.iter_prices("willys:2193", limit=500):
 | `resolve(place, postcode=, lat=, lon=)` | `GET /api/v3/stores/resolve` |
 | `products(q, stores=, limit=)` | `GET /api/v3/products` |
 | `product(chain, store_id, product_id)` | `GET /api/v3/products/{chain}/{store_id}/{product_id}` |
-| `prices(stores, cursor=, limit=)`, `iter_prices(stores, limit=)` | `GET /api/v3/prices` |
+| `prices(stores, cursor=, limit=, offers=)`, `iter_prices(stores, limit=, offers=)` | `GET /api/v3/prices` |
 | `deals(stores, limit=, lookback_days=)` | `GET /api/v3/deals` |
 | `cheap(stores, limit=)` | `GET /api/v3/cheap` |
 | `batch(lookups, stores=)` | `POST /api/v3/batch` |
@@ -231,6 +245,13 @@ curl -H "Authorization: Bearer $PRIMAT_API_KEY" \
 curl -H "Authorization: Bearer $PRIMAT_API_KEY" \
   'https://primat.nu/api/v3/products?q=banan&stores=willys:2193,hemkop:4256&limit=5'
 ```
+
+Full store catalogs come from `/api/v3/prices` as cursor pages: follow
+`next_cursor` until it is null. With `offers=1` the same call returns only the
+rows where `offer_price` is set: the stores' current campaigns, member
+campaigns included, without the rest of the catalog
+(`/api/v3/prices?stores=willys:2193&offers=1`). `/api/v3/deals` gives drops of
+the ordinary price on products without a campaign.
 
 **Python.** `primat_api.py` is standard library only, Python 3.10+. See the
 Python section above for the methods and the errors it raises (401, 402 with

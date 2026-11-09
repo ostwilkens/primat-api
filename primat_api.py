@@ -41,7 +41,7 @@ __all__ = [
     "NotFoundError",
     "RateLimitError",
 ]
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 BASE_URL = "https://primat.nu"
 USER_AGENT = f"primat-api-python/{__version__}"
@@ -183,19 +183,26 @@ class Primat:
                                product_id))
 
     def prices(self, stores: Stores, *, cursor: str | None = None,
-               limit: int | None = None) -> dict:
+               limit: int | None = None, offers: bool = False) -> dict:
         """GET /api/v3/prices: one keyset page of full store catalogs,
-        data[PriceRow] and next_cursor (null on the last page)."""
-        return self._get("/api/v3/prices", {
-            "stores": _scope(stores), "cursor": cursor, "limit": limit})
+        data[PriceRow] and next_cursor (null on the last page).
 
-    def iter_prices(self, stores: Stores, *,
-                    limit: int | None = None) -> Iterator[dict]:
+        offers=True (offers=1) keeps only the rows whose offer_price is set:
+        the stores' current campaigns, member campaigns included, without
+        the rest of the catalog. Same row shape, order and cursor."""
+        return self._get("/api/v3/prices", {
+            "stores": _scope(stores), "cursor": cursor, "limit": limit,
+            "offers": 1 if offers else None})
+
+    def iter_prices(self, stores: Stores, *, limit: int | None = None,
+                    offers: bool = False) -> Iterator[dict]:
         """Every current price row of the stores: prices() pages, following
-        next_cursor until it is null. limit is the page size."""
+        next_cursor until it is null. limit is the page size; offers=True
+        yields only the rows with a current campaign price."""
         cursor = None
         while True:
-            page = self.prices(stores, cursor=cursor, limit=limit)
+            page = self.prices(stores, cursor=cursor, limit=limit,
+                               offers=offers)
             yield from page.get("data") or []
             cursor = page.get("next_cursor")
             if not cursor:
@@ -203,8 +210,9 @@ class Primat:
 
     def deals(self, stores: Stores = None, *, limit: int | None = None,
               lookback_days: int | None = None) -> dict:
-        """GET /api/v3/deals: current price drops, data[Product] with
-        prices.previous and discount_ratio."""
+        """GET /api/v3/deals: drops of the ordinary price on products
+        without a current campaign, data[Product] with prices.previous and
+        discount_ratio. A store's campaigns: iter_prices(offers=True)."""
         return self._get("/api/v3/deals", {
             "stores": _scope(stores), "limit": limit,
             "lookback_days": lookback_days})
