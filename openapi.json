@@ -1007,7 +1007,7 @@
           "history"
         ],
         "summary": "Daily price-change history for one product at one store.",
-        "description": "Paid tiers — Pro: generation-pinned 12 months. Byrå: full history (since Dec 2025). Deep reads are pinned to a committed history generation and time-budgeted (504 history_timeout on overruns).",
+        "description": "Paid tiers — Pro: generation-pinned 3 months. Byrå: full history (since Dec 2025). Deep reads are pinned to a committed history generation and time-budgeted (504 history_timeout on overruns).",
         "parameters": [
           {
             "name": "chain",
