@@ -207,7 +207,7 @@
           "category": {
             "type": "string",
             "nullable": true,
-            "description": "The chain's own category path, ' > '-separated."
+            "description": "The chain's own category path in the chain's own names, ' > '-separated, top level first, e.g. \"Kött, chark & fågel > Kött > Fläsk\". One path per product and chain: the one most of the chain's stores list the product under. Every chain has its own tree and its own names. Willys and Hemköp publish theirs as URL slugs (\"kott-chark-och-fagel > kott > flask\"); since 2026-11-11 the names from their category trees are served instead, and a level the trees do not name stays a slug. null when the chain states no category."
           },
           "amount": {
             "type": "number",
@@ -289,6 +289,11 @@
           "brand": {
             "type": "string",
             "nullable": true
+          },
+          "category": {
+            "type": "string",
+            "nullable": true,
+            "description": "The product's category, the same value as Product.category: the chain's own category path in the chain's own names, ' > '-separated, top level first. null when the chain states no category."
           },
           "gtin": {
             "type": "string",

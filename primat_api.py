@@ -189,7 +189,11 @@ class Primat:
 
         offers=True (offers=1) keeps only the rows whose offer_price is set:
         the stores' current campaigns, member campaigns included, without
-        the rest of the catalog. Same row shape, order and cursor."""
+        the rest of the catalog. Same row shape, order and cursor.
+
+        Every row carries the product's category: the chain's own category
+        path in the chain's own names, top level first, null when the chain
+        states none."""
         return self._get("/api/v3/prices", {
             "stores": _scope(stores), "cursor": cursor, "limit": limit,
             "offers": 1 if offers else None})

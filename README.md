@@ -93,6 +93,12 @@ curl -H "Authorization: Bearer $PRIMAT_API_KEY" \
   'https://primat.nu/api/v3/prices?stores=willys:2193&offers=1'
 ```
 
+Varje rad bär varans kategori i `category`: kedjans egen kategoriväg med
+kedjans egna namn och huvudkategorin först, till exempel
+`Kött, chark & fågel > Kött > Fläsk`. Samma värde står på varuraderna i
+`/api/v3/products`. Varje kedja har sitt eget träd, och `category` är null
+när kedjan inte anger någon kategori.
+
 `/api/v3/deals` ger sänkta ordinarie priser med tidigare pris, på varor utan
 kampanj, och `/api/v3/cheap` varorna med lägst jämförpris. Alla anrop:
 [primat.nu/api](https://primat.nu/api).
@@ -123,10 +129,10 @@ for row in api.products("mellanmjölk", stores=stores, limit=20)["data"]:
 for row in api.iter_prices("willys:2193", limit=500):
     print(row["product_id"], row["name"], row["price"])
 
-# Bara butikens aktuella kampanjer:
+# Bara butikens aktuella kampanjer, med varans kategori:
 for row in api.iter_prices("willys:2193", offers=True):
-    print(row["name"], row["offer_price"], row["offer_label"],
-          row["offer_valid_until"])
+    print(row["category"], row["name"], row["offer_price"],
+          row["offer_label"], row["offer_valid_until"])
 ```
 
 | Metod | Anrop |
@@ -250,7 +256,10 @@ Full store catalogs come from `/api/v3/prices` as cursor pages: follow
 `next_cursor` until it is null. With `offers=1` the same call returns only the
 rows where `offer_price` is set: the stores' current campaigns, member
 campaigns included, without the rest of the catalog
-(`/api/v3/prices?stores=willys:2193&offers=1`). `/api/v3/deals` gives drops of
+(`/api/v3/prices?stores=willys:2193&offers=1`). Every row carries the product's
+`category`: the chain's own category path in the chain's own names, top level
+first (`Kött, chark & fågel > Kött > Fläsk`), the same value as on the product
+rows, and null when the chain states none. `/api/v3/deals` gives drops of
 the ordinary price on products without a campaign.
 
 **Python.** `primat_api.py` is standard library only, Python 3.10+. See the
